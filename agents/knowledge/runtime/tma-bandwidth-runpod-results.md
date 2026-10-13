@@ -74,3 +74,37 @@ old number without accounting for these differences.
   were not collected. A large working set does not prove a zero cache-hit rate.
 - No numerical payload check, store/reduction run, unequal-demand isolation
   experiment, or deadline evaluation is included in these measurements.
+
+## Component-count sweep
+
+Measured subsequently on benchmark commit `7749380`, same GPU and parameters,
+two warmups and five measured launches per case. No competing compute process
+was reported. Python-only change; the existing extension was reused.
+
+```bash
+python app/python/bandwidth_load.py --components 2 4 6 8 --json output/runpod_bandwidth_scaling_20261013.json
+```
+
+Fresh best-effort reference: **1829.79 GB/s**, 4.181 ms. Every component receives
+1/N of this rate, divided equally over its own workers. The first N-1 groups
+receive floor(114/N) workers; the last receives the remainder. Worker indices
+are block indices, not physical SM affinity; the launch has 114 worker blocks.
+
+| Components | Workers per component | Cap each (GB/s) | Achieved per component (GB/s) | Aggregate (GB/s) | % reference | Finish (ms) |
+| ---: | --- | ---: | --- | ---: | ---: | ---: |
+| 2 | 57, 57 | 914.90 | 912.83–912.89 | 1825.62 | 99.8% | 4.191 |
+| 4 | 28, 28, 28, 30 | 457.45 | First three: 449.24–449.54; last: 457.06 | 1736.73 | 94.9% | 4.405 |
+| 6 | 19 × 6 | 304.97 | 304.31–304.39 | 1825.77 | 99.8% | 4.190 |
+| 8 | 14 × 7, 16 | 228.72 | First seven: 224.68–224.94; last: 228.68 | 1629.32 | 89.0% | 4.695 |
+
+Equal work per worker gives the last group more bytes in the 4/8 cases, despite
+its equal aggregate bandwidth cap. The ideal full-completion-window throughput
+relative to the reference is 114/(N × largest group): 95.0% for four components
+and 89.06% for eight. Observed aggregate rates closely follow these tails;
+they should not be attributed to scheduler overhead. Per-component rates use
+each group's own active window and need not sum to the aggregate rate.
+
+This checks throughput with 2–8 disjoint worker groups and local budgets. It
+does not exercise same-SM multiplexing or establish isolation under unequal
+demand. Raw per-worker timestamps and all trials are retained in
+`output/runpod_bandwidth_scaling_20261013.json`, locally and on RunPod.
