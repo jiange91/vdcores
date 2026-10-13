@@ -1,8 +1,10 @@
 # TMA Bandwidth Isolation
 
 Design discussion, 2026-10-12; local rate/burst implementation added 2026-10-13.
-No tests are included, as requested. CUDA compilation and GPU behavior are not
-verified on the inspection host, which has no `nvcc` or NVIDIA GPU environment.
+No tests are included, as requested. CUDA compilation and the load-only benchmark
+were verified on RunPod's H100 PCIe on 2026-10-13; see
+[run results](tma-bandwidth-runpod-results.md). Store/reduction behavior and general
+workload isolation remain unverified. The local Mac has no CUDA environment.
 
 Current agreed implementation scope: fixed per-launch local rate/burst budgets only. Do not implement live updates or explicit outstanding-transfer tracking. Their discussion below is background, not a requirement for the first version.
 
@@ -61,7 +63,7 @@ Outstanding-byte limits, live configuration changes, and borrowing are outside t
 - `src/runtime.cu`, `src/torch_runtime.cu`, and `include/dae/dae2.cuh` pass an optional config table to the kernel and initialize local state once. No per-TMA global budget atomic or global policy read is added.
 - No tests are added. The separately requested `app/python/bandwidth_load.py` benchmark compares disabled admission with two 50% bandwidth partitions, keeping the current kernel and workload unchanged. It uses both load ports, no workload stores, and device start/end timestamps; results are logical TMA throughput rather than DRAM counters. The cap is half the median best-effort aggregate rate. Equal offered load evaluates the balanced case, not isolation under unequal demand.
 
-Fair scheduling between issuers, floating-point/clock quantization effects, register usage, and actual overhead/isolation still require GPU evaluation. The local admission lock is a simple first version, not a claim of minimum possible overhead or hard real-time guarantees.
+The balanced load-only run retained 99.8% of the disabled kernel's aggregate throughput, and a lower-cap calibration demonstrated throttling. These results do not establish fair scheduling, interference isolation for unequal workloads, or general overhead. The local admission lock is a simple first version, not a claim of minimum possible overhead or hard real-time guarantees.
 
 ## Global policy, local enforcement
 

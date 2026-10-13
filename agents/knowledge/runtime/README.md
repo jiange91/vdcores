@@ -14,6 +14,7 @@ Then pull in narrower notes as needed:
 - [gemm-scheduler.md](/home1/11362/depctg/vdcores/agents/knowledge/runtime/gemm-scheduler.md)
 - [memory-admission-boundaries.md](memory-admission-boundaries.md): current transfer/dependency paths, direct-global-memory bypasses, and boundaries for future bandwidth admission control
 - [tma-bandwidth-isolation-design.md](tma-bandwidth-isolation-design.md): implemented local rate/burst API, accounting scope, and validation; outstanding/live controls are outside the current implementation
+- [tma-bandwidth-runpod-results.md](tma-bandwidth-runpod-results.md): H100 PCIe build and load-only best-effort/partitioned measurements, including worker-count and unit caveats
 
 ## What Each Note Covers
 
