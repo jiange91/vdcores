@@ -5,6 +5,7 @@
 #include "allocator.cuh"
 #include "queue.cuh"
 #include "compute_dispatch.cuh"
+#include "bandwidth.cuh"
 
 #include <cuda.h>
 #include <cuda/barrier>
@@ -30,7 +31,8 @@ void dae2(
   const MInst* __restrict__ memory_instructions,
   const CUtensorMap* __restrict__ tma_descs,
   int * __restrict__ bars,
-  uint64_t *  __restrict__ g_events
+  uint64_t *  __restrict__ g_events,
+  const BandwidthConfig * __restrict__ bandwidth_configs
 ) {
 
   int sm_id = blockIdx.x;
@@ -105,10 +107,13 @@ void dae2(
   // alloc a small scratch space for temporary data
   // argmax uses this
   __shared__ uint64_t scratch_space[32]; // 8-bytes aligned
+  __shared__ BlockBandwidthLimiter bandwidth_limiter;
 
   if (threadIdx.x == 0) {
     int event_base = sm_id * numProfileEvents;
     g_events[event_base + 0] = cuda::ptx::get_sreg_globaltimer();
+    const BandwidthConfig cfg = bandwidth_configs ? bandwidth_configs[sm_id] : BandwidthConfig{0.0, 0};
+    bandwidth_limiter.init(cfg, g_events[event_base + 0]);
   }
 
   __syncthreads();
@@ -144,6 +149,8 @@ void dae2(
     }
     __cprint("Finished execution pc=%d", pc-1);
   } else { // memory warp group
+    BlockBandwidthLimiter *limiter = bandwidth_limiter.config.bytes_per_ns > 0
+        ? &bandwidth_limiter : nullptr;
     // TODO(zhiyuang): reduce the register usage in memory warps
     // cuda::ptx::set_max_nreg();
 
@@ -158,7 +165,7 @@ void dae2(
       if (lane_id == 0) {
         stwarp_execute_singlethread(
           c2m, st_insts,
-          smem_base, tma_descs, bars
+          smem_base, tma_descs, bars, limiter
         );
       }
     } else if (warp_id >= 2) { // LD Warps 0-1
@@ -167,7 +174,7 @@ void dae2(
         ldwarp_execute_singlethread(
           m2ld[port_id], m2c,
           st_insts,
-          smem_base, tma_descs, bars
+          smem_base, tma_descs, bars, limiter
         );
       }
     } // End of warps

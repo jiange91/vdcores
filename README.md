@@ -51,6 +51,46 @@ Notes:
 
 ## Getting Started
 
+### Fixed TMA Bandwidth Caps
+
+Configure a component's aggregate read-plus-write cap before launching:
+
+```python
+dae.set_bandwidth("slow", num_sms=64, base_sm=0, bandwidth_gb_s=400)
+dae.set_bandwidth("fast", num_sms=64, base_sm=64, bandwidth_gb_s=200)
+dae.s(slow_schedule.place(64), fast_schedule.place(64, base_sm=64))
+dae.launch()
+```
+
+Rates use decimal GB/s and are divided equally among the configured worker
+blocks. Each block shares one token bucket between its two load issuers and
+store issuer. The optional `burst_bytes_per_sm` defaults to 64 KiB; each launch
+starts with a full bucket. Omitted settings or `bandwidth_gb_s=None` disable the
+limiter. Settings apply to the next launch; there are no live updates.
+
+This controls admitted TMA traffic, not measured HBM service. Known raw-address
+bypasses on limited workers are rejected. TMA reductions charge twice their
+payload size as a read/modify/write accounting model. Burst allowances must
+cover the largest charged operation. Instruction placement still uses
+`Schedule.place`; worker indices do not provide physical SM affinity.
+
+Rebuild the extension with `make pyext` before using the new API.
+
+For a TMA-load-only comparison, run:
+
+```bash
+python app/python/bandwidth_load.py --json output/bandwidth_load.json
+```
+
+The script measures best-effort throughput with admission disabled, then gives
+two equal worker partitions 50% of that measured rate each. Both cases use the
+current kernel, identical input, and both load ports. It reports median aggregate
+and per-component GB/s using device timestamps. There are no workload stores;
+the dummy consumer only releases completed load buffers. Reported bytes are
+logical TMA traffic, not DRAM counters. Keep the working set larger than L2.
+
+### Runtime Layout
+
 The codebase is organized around three layers:
 
 - `include/dae/` and `src/`: the core runtime, virtual core abstractions, queues, allocators, launcher plumbing, and CUDA backend. Good entry points are [`include/dae/runtime.cuh`](include/dae/runtime.cuh), [`include/dae/virtualcore.cuh`](include/dae/virtualcore.cuh), [`src/runtime.cu`](src/runtime.cu), and [`src/torch_runtime.cu`](src/torch_runtime.cu).

@@ -3,6 +3,7 @@ from .instruction_utils import decode_opcode, dedcode_opcode
 from .instructions import *
 from .runtime import config, opcode
 from .tma_utils import *
+from .bandwidth import BandwidthPartitions
 
 import copy
 import os
@@ -220,6 +221,7 @@ class Launcher:
 
         self.max_insts = config.max_insts
         self.builder = [SMInstructionBuilder(sm_id=i) for i in range(num_sms)]
+        self._bandwidth = BandwidthPartitions(num_sms)
         self.profile = torch.empty((num_sms, config.num_profile_events), dtype=torch.uint64, device=self.device)
 
         self.cinsts = torch.empty((num_sms, self.max_insts, 8), dtype=torch.uint8)
@@ -248,6 +250,30 @@ class Launcher:
         runtime.set_smem_size(self.smem_size)
 
     # resource management functions
+    def set_bandwidth(self, name: str, *, num_sms: int, base_sm: int = 0,
+                      bandwidth_gb_s: float | None = None,
+                      burst_bytes_per_sm: int = 64 * 1024):
+        """Set a fixed read+write TMA cap, in decimal GB/s, for a worker range.
+
+        Workers receive equal rate shares and one shared local burst bucket.
+        None disables the cap. Changes take effect on the next launch only;
+        placement remains controlled by Schedule.place().
+        """
+        self._bandwidth.set(name, num_sms=num_sms, base_sm=base_sm,
+                            bandwidth_gb_s=bandwidth_gb_s,
+                            burst_bytes_per_sm=burst_bytes_per_sm)
+        return self
+
+    def _bandwidth_config_tensor(self):
+        if not self._bandwidth.enabled:
+            return None
+        if not hasattr(runtime, "bandwidth_transfer_costs"):
+            raise RuntimeError("Bandwidth limiting requires rebuilding dae.runtime with make pyext")
+        streams = [b.built_minsts + b.minsts for b in self.builder]
+        payload = self._bandwidth.pack(streams, runtime.bandwidth_transfer_costs,
+                                       set(runtime.bandwidth_unsupported_ops))
+        return torch.tensor(list(payload), dtype=torch.uint8).view(self.num_sms, 16).to(self.device)
+
     def add_group(self, name, size):
         assert name not in self.resource_groups, f"Resource group with name {name} already exists"
         self.resource_groups[name] = ResourceGroup(name, size)
@@ -466,6 +492,9 @@ class Launcher:
         return ci / self.num_sms, mi / self.num_sms
 
     def launch(self):
+        # Validate unsupported traffic and burst sizes before serializing or
+        # launching; an undersized bucket would otherwise wait forever.
+        bandwidth_config = self._bandwidth_config_tensor()
         self.build_instructions()
 
         supported_compute_ops = getattr(runtime, "supported_compute_ops", None)
@@ -523,12 +552,16 @@ class Launcher:
                 cache_window["num_bytes"] if cache_window["num_bytes"] is not None else -1,
             )
 
-        ret = runtime.launch_dae(
+        launch_args = (
             self.num_sms, self.smem_size,
             cinsts, minsts, tma,
             self.bars, profile,
             stream
         )
+        # Keep the legacy positional call when disabled, including compatibility
+        # with an older extension while Python-only applications are upgraded.
+        ret = runtime.launch_dae(*launch_args) if bandwidth_config is None else runtime.launch_dae(
+            *launch_args, bandwidth_config)
         assert ret == 0
 
     def compute_operator_names(self) -> list[str]:

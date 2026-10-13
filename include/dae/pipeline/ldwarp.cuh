@@ -1,12 +1,14 @@
 #pragma once
 
 #include "virtualcore.cuh"
+#include "bandwidth.cuh"
 
 template<typename M2LD_Type, typename M2C_Type>
 __device__ __forceinline__ void ldwarp_execute_singlethread(
     M2LD_Type &m2ld, M2C_Type &m2c,
     const MInst *st_insts,
-    const void *smem_base, const CUtensorMap *tma_descs, int *bars) {
+    const void *smem_base, const CUtensorMap *tma_descs, int *bars,
+    BlockBandwidthLimiter *limiter = nullptr) {
 
   __ldprint("[LD Warp] Start LD warp execution");
 
@@ -45,6 +47,8 @@ __device__ __forceinline__ void ldwarp_execute_singlethread(
     };
 
     // TODO(zhiyuang): change location?
+    if (limiter)
+      limiter->admit(tma_load_bytes(inst));
     switch(op(opcode)) {
       case op(OP_ALLOC_TMA_LOAD_1D): {
         __ldprint("TMA 1D Load: size=%d", inst.size);

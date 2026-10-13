@@ -1,7 +1,9 @@
 #include "dae/runtime.cuh"
 #include "dae/context.cuh"
+#include "dae/bandwidth.cuh"
 
 #include <torch/extension.h>
+#include <pybind11/stl.h>
 
 #include <cuda.h>            // Driver API
 #include <cuda_runtime.h>
@@ -139,7 +141,8 @@ int py_launch_dae(
     torch::Tensor tma_descs_bytes,       // uint8 buffer
     torch::Tensor bars_int32,            // int32
     torch::Tensor profile_u64,           // uint64
-    int64_t stream
+    int64_t stream,
+    std::optional<torch::Tensor> bandwidth_configs = std::nullopt
 ) {
   set_persistent_cache();
 
@@ -152,11 +155,19 @@ int py_launch_dae(
   auto tma = check_tensor_ptr<CUtensorMap>(tma_descs_bytes, "tma_descs_bytes");
   auto bars = check_tensor_ptr<int>(bars_int32, "bars_int32");
   auto prof = check_tensor_ptr<uint64_t>(profile_u64, "profile_u64");
+  const BandwidthConfig *bandwidth = nullptr;
+  if (bandwidth_configs.has_value()) {
+    auto &cfg = *bandwidth_configs;
+    bandwidth = check_tensor_ptr<BandwidthConfig>(cfg, "bandwidth_configs");
+    TORCH_CHECK(cfg.size(0) == num_sms, "bandwidth_configs must have one row per worker");
+    TORCH_CHECK(cfg.device() == compute_insts_bytes.device(),
+                "bandwidth_configs and instructions must be on the same device");
+  }
 
   cudaError_t st = launch_dae(
       static_cast<int>(num_sms), smem_size,
       cinst, minst, tma,
-      bars, prof, stream
+      bars, prof, stream, bandwidth
   );
 
   TORCH_CHECK(st == cudaSuccess, "launch_dae failed: ", cudaGetErrorString(st));
@@ -367,6 +378,18 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   #undef DAE_COMPUTE_OP
   m.attr("supported_compute_ops") = supported_compute_ops;
 
+  py::dict bandwidth_transfer_costs;
+  py::list bandwidth_unsupported_ops;
+  #define DAE_BW_LOAD(name, multiplier) bandwidth_transfer_costs[py::int_(::op(name))] = py::int_(multiplier);
+  #define DAE_BW_STORE(name, multiplier) DAE_BW_LOAD(name, multiplier)
+  #define DAE_BW_UNSUPPORTED(name) bandwidth_unsupported_ops.append(py::int_(::op(name)));
+  #include "dae/bandwidth_ops.inc"
+  #undef DAE_BW_LOAD
+  #undef DAE_BW_STORE
+  #undef DAE_BW_UNSUPPORTED
+  m.attr("bandwidth_transfer_costs") = bandwidth_transfer_costs;
+  m.attr("bandwidth_unsupported_ops") = bandwidth_unsupported_ops;
+
   auto config = m.def_submodule("config", "DAE2 Configuration Constants");
   config.attr("slot_size") = slotSizeKb * 1024;
   config.attr("num_slots") = numSlots;
@@ -391,6 +414,11 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("set_smem_size", &py_set_smem_size,
             "Set dynamic shared memory size for DAE2 kernel");
   m.def("launch_dae", &py_launch_dae,
+            py::arg("num_sms"), py::arg("smem_size"),
+            py::arg("compute_insts_bytes"), py::arg("memory_insts_bytes"),
+            py::arg("tma_descs_bytes"), py::arg("bars_int32"),
+            py::arg("profile_u64"), py::arg("stream"),
+            py::arg("bandwidth_configs") = py::none(),
             "Launch DAE2 kernel with given parameters");
   m.def("build_tma_desc", &py_build_tma_desc,
             "Build CUtensorMap descriptor for given tensor and layout");

@@ -1,12 +1,14 @@
 #pragma once
 
 #include "virtualcore.cuh"
+#include "bandwidth.cuh"
 
 // TODO(zhiyuang): attach bars to the writeback
 template<typename C2M_Type>
 __device__ __forceinline__ void stwarp_execute_singlethread(
     C2M_Type &c2m, const MInst* slot_insts,
-    const void *smem_base, const CUtensorMap *tma_descs, int *bars) {
+    const void *smem_base, const CUtensorMap *tma_descs, int *bars,
+    BlockBandwidthLimiter *limiter = nullptr) {
 
   __stprint("[ST Warp] Start ST warp execution");
     
@@ -21,6 +23,8 @@ __device__ __forceinline__ void stwarp_execute_singlethread(
     auto &inst = slot_insts[slot];
     uint16_t opcode = inst.opcode;
     // all ops are writeback ops
+    if (limiter)
+      limiter->admit(tma_store_bytes(inst));
 
     switch(op(opcode)) {
       case op(OP_ALLOC_WB_TMA_STORE_1D):

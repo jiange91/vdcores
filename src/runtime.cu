@@ -23,7 +23,8 @@ cudaError_t launch_dae(
   CUtensorMap* tma_descs,
   int * bars,
   uint64_t * profile,
-  int64_t stream
+  int64_t stream,
+  const BandwidthConfig* bandwidth_configs
 ) {
   // wait for all pre-launch meta-data copying
   cudaDeviceSynchronize();
@@ -33,7 +34,8 @@ cudaError_t launch_dae(
     memory_instructions,
     tma_descs,
     bars,
-    profile
+    profile,
+    bandwidth_configs
   );
   // TODO(zhiyuang): check launch error here?
 

@@ -12,6 +12,8 @@ Then pull in narrower notes as needed:
 
 - [memory-core-performance-knobs.md](/home1/11362/depctg/vdcores/agents/knowledge/runtime/memory-core-performance-knobs.md)
 - [gemm-scheduler.md](/home1/11362/depctg/vdcores/agents/knowledge/runtime/gemm-scheduler.md)
+- [memory-admission-boundaries.md](memory-admission-boundaries.md): current transfer/dependency paths, direct-global-memory bypasses, and boundaries for future bandwidth admission control
+- [tma-bandwidth-isolation-design.md](tma-bandwidth-isolation-design.md): implemented local rate/burst API, accounting scope, and validation; outstanding/live controls are outside the current implementation
 
 ## What Each Note Covers
 

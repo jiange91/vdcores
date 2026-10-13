@@ -43,7 +43,7 @@ APPS := $(patsubst app/%.cu,%,$(CUFILES))
 SOURCES = main.cu 
 
 # Header files (for dependency tracking)
-HEADERS = $(wildcard include/dae/*.cuh) $(wildcard include/task/*.cuh) $(wildcard include/dae/pipeline/*.cuh)
+HEADERS = $(wildcard include/dae/*.cuh) $(wildcard include/task/*.cuh) $(wildcard include/dae/pipeline/*.cuh) include/dae/bandwidth_ops.inc
 
 # for make <target> run
 BIN ?= $(firstword $(filter-out run,$(MAKECMDGOALS)))
