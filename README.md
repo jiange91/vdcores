@@ -87,9 +87,12 @@ python app/python/bandwidth_load.py --components 2 4 6 8 --json output/bandwidth
 The script measures best-effort throughput with admission disabled, then gives
 each of N components 1/N of that measured rate. Workers are split evenly with
 the remainder assigned to the last component; the default is two components.
-All cases use the current kernel, identical input, and both load ports. Work is
-equal per worker, so extra workers in the last component cause a completion tail
-under equal component caps. It reports median aggregate
+All cases use the current kernel, the same source allocation, and both load ports.
+Each component loads exactly the same number of bytes; workers in the larger
+last group perform fewer loads. `--loads-per-sm` sets baseline work; partitioned
+work is rounded up to complete load pairs with uniform work inside each group.
+Measured bytes reflect the actual per-worker load counts, retained in JSON.
+It reports median aggregate
 and per-component GB/s using device timestamps. There are no workload stores;
 the dummy consumer only releases completed load buffers. Reported bytes are
 logical TMA traffic, not DRAM counters. Keep the working set larger than L2.
