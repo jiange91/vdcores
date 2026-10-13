@@ -1,5 +1,9 @@
 # TMA Bandwidth: RunPod H100 PCIe
 
+For the current balanced scaling benchmark, use the final section below.
+Earlier 4/8-component sweeps assigned unequal total work and are historical
+completion-time measurements, not the current scaling comparison.
+
 Measured 2026-10-13 on implementation commit `e4ad2ea`, branch `zj/bw-isolation`,
 checkout `/vdcores`. Hardware: NVIDIA H100 PCIe, 114 physical SMs, 81,559 MiB.
 Conda base: PyTorch `2.14.1+cu130`, CUDA 13.0. No competing compute process was
@@ -120,3 +124,40 @@ Eight components: cap 228.69 each, first seven achieved 224.68–224.93 and last
 the previous sweep by less than 0.02%; the completion-tail observation reproduces.
 Raw results: `output/runpod_bandwidth_scaling_4_8_rerun_20261013.json` locally
 and on RunPod. Remote log: `.agentlog/bandwidth_scaling_4_8_rerun.log`.
+
+## Corrected benchmark: equal bytes per component
+
+Implementation `5deab54` fixes the workload imbalance. Each component receives
+exactly equal total bytes per pass. The pair count is rounded up to a common
+multiple of the worker-group sizes, giving uniform work within each group.
+The last group's extra workers each issue fewer loads. Both instruction counts
+and measured byte counts use this same per-worker plan; JSON retains the plan,
+actual accessed working set, total load bytes, and source allocation separately.
+
+Same H100, no competing compute process, unchanged tile/burst/pass defaults,
+two warmups/five measured launches, sequential `--components 2 4 6 8`.
+Python-only changes reused the existing extension. Best effort **1829.29 GB/s**.
+
+| Components | Worker groups | Loads/worker/pass by group | Cap each (GB/s) | Achieved each (GB/s) | Aggregate (GB/s) | % reference |
+| ---: | --- | --- | ---: | --- | ---: | ---: |
+| 2 | 57, 57 | 1024, 1024 | 914.64 | 912.66–912.72 | 1825.28 | 99.8% |
+| 4 | 28 × 3, 30 | 1050 × 3, 980 | 457.32 | First three: 449.24–449.35; last: 456.94 | 1796.93 | 98.2% |
+| 6 | 19 × 6 | 1024 × 6 | 304.88 | 304.24–304.28 | 1825.28 | 99.8% |
+| 8 | 14 × 7, 16 | 1056 × 7, 924 | 228.66 | First seven: 224.64–224.89; last: 228.61 | 1796.97 | 98.2% |
+
+Four-component aggregate traffic is 7.707 GB/launch, eight-component traffic
+7.751 GB/launch; two/six and baseline are 7.650 GB/launch. Each reported rate
+uses actual issued bytes, so the rounding is accounted for. Source allocation
+is 940.5 MiB, with at least 912 MiB actually accessed per case, well beyond L2.
+
+The large historical extra-work tail is removed. Remaining 4/8 loss is about
+1.8%; the smaller groups run below their caps and finish slightly later than
+the last group despite equal bytes. A cap is an admission ceiling, not a reserved
+bandwidth guarantee; the cause of this residual gap is not established here.
+Do not present it entirely as limiter overhead or a function of component count.
+
+Verified equal component byte counts and matching aggregate byte totals in all
+recorded trials. Local/remote artifact:
+`output/runpod_bandwidth_balanced_20261013.json`. Remote log:
+`.agentlog/bandwidth_balanced.log`. No tests added. Metrics remain logical TMA
+throughput, not DRAM counters or proof of zero cache hits.
