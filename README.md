@@ -97,6 +97,22 @@ and per-component GB/s using device timestamps. There are no workload stores;
 the dummy consumer only releases completed load buffers. Reported bytes are
 logical TMA traffic, not DRAM counters. Keep the working set larger than L2.
 
+For independent two-component worker/BW allocations, run:
+
+```bash
+python app/python/bandwidth_partition.py --sm-splits 1:1 1:3 3:1 --bw-splits 1:1 1:3 3:1 --json output/bandwidth_partition.json
+```
+
+This sweeps the cross product, compares each case with identical work under
+SM-only allocation, and reports achieved rates separately from caps. Traffic
+is proportional to BW weights to avoid an artificial completion tail. Total
+caps default to 70% of the all-worker reference; use `--total-cap-fraction` to
+change this headroom. Both components remain load-only. The experiment evaluates
+independent bandwidth control, not compute throughput or a bandwidth guarantee.
+Defaults use 32-KiB transfers, 256 tiles/worker and 32 passes: larger transfers
+allow a small worker group to offer high bandwidth. The original 8-KiB workload
+can be selected with `--tile-bytes 8192 --loads-per-sm 1024 --passes 8`.
+
 ### Runtime Layout
 
 The codebase is organized around three layers:

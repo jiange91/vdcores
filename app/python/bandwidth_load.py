@@ -78,7 +78,8 @@ def balanced_worker_loads(args, components):
     return loads
 
 
-def build_launcher(source, args, total_cap_gb_s=None, components=2, worker_loads=None):
+def build_launcher(source, args, total_cap_gb_s=None, components=2, worker_loads=None,
+                   *, component_budgets=None):
     from dae.launcher import Launcher
     from dae.instructions import Dummy, LoopC, LoopM, RepeatM, TmaLoad1D
 
@@ -103,15 +104,20 @@ def build_launcher(source, args, total_cap_gb_s=None, components=2, worker_loads
         ]
 
     dae.s(program)
-    if total_cap_gb_s is not None:
-        for name, (begin, end) in component_ranges(args.sms, components).items():
+    if component_budgets is None and total_cap_gb_s is not None:
+        component_budgets = [
+            (name, begin, end, total_cap_gb_s / components)
+            for name, (begin, end) in component_ranges(args.sms, components).items()
+        ]
+    if component_budgets is not None:
+        for name, begin, end, cap in component_budgets:
             dae.set_bandwidth(name, num_sms=end - begin, base_sm=begin,
-                              bandwidth_gb_s=total_cap_gb_s / components,
+                              bandwidth_gb_s=cap,
                               burst_bytes_per_sm=args.burst_bytes_per_sm)
     return dae
 
 
-def measure(dae, args, label, components=2, worker_loads=None):
+def measure(dae, args, label, components=2, worker_loads=None, *, component_scopes=None):
     for iteration in range(args.warmup):
         print(f"[launch] {label} warmup {iteration + 1}/{args.warmup}", flush=True)
         dae.launch()
@@ -119,7 +125,9 @@ def measure(dae, args, label, components=2, worker_loads=None):
     if worker_loads is None:
         worker_loads = [args.loads_per_sm] * args.sms
     scopes = {"all": (0, args.sms)}
-    if components:
+    if component_scopes is not None:
+        scopes.update(component_scopes)
+    elif components:
         scopes.update(component_ranges(args.sms, components))
     trials = []
     for iteration in range(args.repeats):
