@@ -80,11 +80,16 @@ For a TMA-load-only comparison, run:
 
 ```bash
 python app/python/bandwidth_load.py --json output/bandwidth_load.json
+# Sequential component-count sweep:
+python app/python/bandwidth_load.py --components 2 4 6 8 --json output/bandwidth_scaling.json
 ```
 
 The script measures best-effort throughput with admission disabled, then gives
-two equal worker partitions 50% of that measured rate each. Both cases use the
-current kernel, identical input, and both load ports. It reports median aggregate
+each of N components 1/N of that measured rate. Workers are split evenly with
+the remainder assigned to the last component; the default is two components.
+All cases use the current kernel, identical input, and both load ports. Work is
+equal per worker, so extra workers in the last component cause a completion tail
+under equal component caps. It reports median aggregate
 and per-component GB/s using device timestamps. There are no workload stores;
 the dummy consumer only releases completed load buffers. Reported bytes are
 logical TMA traffic, not DRAM counters. Keep the working set larger than L2.

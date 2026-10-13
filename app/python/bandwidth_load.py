@@ -1,4 +1,4 @@
-"""Compare unlimited TMA loads with two equal bandwidth partitions.
+"""Compare unlimited TMA loads with equal bandwidth partitions.
 
 Only workload loads are issued: no TMA stores or tensor computation. The current
 runtime's dummy consumer waits for completed loads and releases their slots.
@@ -14,7 +14,9 @@ from statistics import median
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sms", type=int, default=None,
-                        help="Total worker blocks, split equally; default: available SMs, up to 132")
+                        help="Total worker blocks; default: available SMs, up to 132")
+    parser.add_argument("--components", type=int, nargs="+", default=[2],
+                        help="Component counts to run sequentially, e.g. 2 4 6 8; remainder workers go to last")
     parser.add_argument("--tile-bytes", type=int, default=8192)
     parser.add_argument("--loads-per-sm", type=int, default=1024,
                         help="Even number of unique load tiles per worker per pass")
@@ -25,8 +27,12 @@ def parse_args():
     parser.add_argument("--burst-bytes-per-sm", type=int, default=65536)
     parser.add_argument("--json", type=Path, default=None, help="Optional output path")
     args = parser.parse_args()
-    if args.sms is not None and (args.sms < 2 or args.sms > 132 or args.sms % 2):
-        parser.error("sms must be an even number in [2, 132]")
+    if any(count < 2 or count > 132 for count in args.components):
+        parser.error("components must be in [2, 132]")
+    if len(set(args.components)) != len(args.components):
+        parser.error("component counts must be unique")
+    if args.sms is not None and not max(args.components) <= args.sms <= 132:
+        parser.error("sms must be between the largest component count and 132")
     if not 0 < args.tile_bytes <= 65520 or args.tile_bytes % 16:
         parser.error("tile-bytes must be a positive multiple of 16, at most 65520")
     if not 2 <= args.loads_per_sm <= 65534 or args.loads_per_sm % 2:
@@ -40,7 +46,18 @@ def parse_args():
     return args
 
 
-def build_launcher(source, args, total_cap_gb_s=None):
+def component_ranges(sms, components):
+    """Contiguous worker ranges; only the last receives the remainder."""
+    width = sms // components
+    if width < 1:
+        raise ValueError("Each component needs at least one worker")
+    return {
+        f"component_{index}": (index * width, (index + 1) * width if index < components - 1 else sms)
+        for index in range(components)
+    }
+
+
+def build_launcher(source, args, total_cap_gb_s=None, components=2):
     from dae.launcher import Launcher
     from dae.instructions import Dummy, LoopC, LoopM, RepeatM, TmaLoad1D
 
@@ -63,22 +80,22 @@ def build_launcher(source, args, total_cap_gb_s=None):
 
     dae.s(program)
     if total_cap_gb_s is not None:
-        half = args.sms // 2
-        for name, base in [("component_0", 0), ("component_1", half)]:
-            dae.set_bandwidth(name, num_sms=half, base_sm=base,
-                              bandwidth_gb_s=total_cap_gb_s / 2,
+        for name, (begin, end) in component_ranges(args.sms, components).items():
+            dae.set_bandwidth(name, num_sms=end - begin, base_sm=begin,
+                              bandwidth_gb_s=total_cap_gb_s / components,
                               burst_bytes_per_sm=args.burst_bytes_per_sm)
     return dae
 
 
-def measure(dae, args, label):
+def measure(dae, args, label, components=2):
     for iteration in range(args.warmup):
         print(f"[launch] {label} warmup {iteration + 1}/{args.warmup}", flush=True)
         dae.launch()
 
     bytes_per_worker = args.loads_per_sm * args.passes * args.tile_bytes
-    half = args.sms // 2
-    scopes = {"all": (0, args.sms), "component_0": (0, half), "component_1": (half, args.sms)}
+    scopes = {"all": (0, args.sms)}
+    if components:
+        scopes.update(component_ranges(args.sms, components))
     trials = []
     for iteration in range(args.repeats):
         print(f"[launch] {label} measured {iteration + 1}/{args.repeats}", flush=True)
@@ -134,31 +151,41 @@ def main():
         raise RuntimeError("The current build targets Hopper (sm_90a)")
     if args.sms is None:
         args.sms = min(properties.multi_processor_count, 132)
-        args.sms -= args.sms % 2
-    if args.sms < 2 or args.sms > properties.multi_processor_count:
-        raise ValueError("Worker count must fit the GPU and allow two nonempty partitions")
+    if args.sms < max(args.components) or args.sms > properties.multi_processor_count:
+        raise ValueError("Worker count must fit the GPU and allow nonempty partitions")
 
     working_bytes = args.sms * args.loads_per_sm * args.tile_bytes
-    print(f"Device: {properties.name}; workers: {args.sms} ({args.sms // 2} per component)")
+    print(f"Device: {properties.name}; workers: {args.sms}; component sweep: {args.components}")
     print(f"Working set: {working_bytes / 1024**2:.1f} MiB; "
           f"load traffic per launch: {working_bytes * args.passes / 1e9:.3f} GB")
-    print("Both load ports active; no workload stores. Using current kernel for both cases.")
+    print("Both load ports active; no workload stores. Using current kernel for all cases.")
     torch.manual_seed(0)
     source = torch.empty((args.sms, args.loads_per_sm * args.tile_bytes),
                          dtype=torch.uint8, device="cuda").random_(0, 256)
     torch.cuda.synchronize()
 
-    best_effort = measure(build_launcher(source, args), args, "best_effort")
+    best_effort = measure(build_launcher(source, args), args, "best_effort", components=0)
     reference = best_effort["summary"]["all"]["gb_s"]
-    print(f"Best-effort reference: {reference:.2f} GB/s; "
-          f"setting each component cap to {reference / 2:.2f} GB/s", flush=True)
-    partitioned = measure(build_launcher(source, args, reference), args, "split_50_50")
+    print(f"Best-effort reference: {reference:.2f} GB/s", flush=True)
+    partitioned = {}
+    rows = [("best_effort", "all", None, best_effort)]
+    for count in args.components:
+        ranges = component_ranges(args.sms, count)
+        cap = reference / count
+        print(f"Components: {count}; workers: {[end - begin for begin, end in ranges.values()]}; "
+              f"cap per component: {cap:.2f} GB/s", flush=True)
+        result = measure(build_launcher(source, args, reference, count), args, f"split_{count}", count)
+        partitioned[str(count)] = {
+            "component_cap_gb_s": cap,
+            "partitions": {name: {"base_sm": begin, "num_sms": end - begin}
+                           for name, (begin, end) in ranges.items()},
+            **result,
+        }
+        rows += [(f"split_{count}", scope, cap, result) for scope in ranges]
+        rows.append((f"split_{count}", "all", reference, result))
 
     print("\n| case | scope | cap (GB/s) | achieved (GB/s) | % best effort | duration (ms) |")
     print("| --- | --- | ---: | ---: | ---: | ---: |")
-    rows = [("best_effort", "all", None, best_effort)]
-    rows += [("split_50_50", scope, reference if scope == "all" else reference / 2, partitioned)
-             for scope in ["component_0", "component_1", "all"]]
     for case, scope, cap, result in rows:
         stats = result["summary"][scope]
         cap_text = "unlimited" if cap is None else f"{cap:.2f}"
@@ -166,6 +193,8 @@ def main():
               f"{100 * stats['gb_s'] / reference:.1f}% | {stats['duration_ms']:.3f} |")
     print("\nMedians across measured launches. Component rates use each component's own "
           "start-to-finish window; aggregate rates use the whole worker set.")
+    print("Work is equal per worker. The last component may have more workers and bytes "
+          "but the same bandwidth cap, creating a longer tail when worker counts do not divide evenly.")
     print("GB/s is logical TMA-load throughput, assuming cache misses; it is not a DRAM-counter "
           "measurement. Use a working set well beyond L2. Initial burst credits can raise "
           "short-run average rates above the configured cap.")
@@ -178,9 +207,8 @@ def main():
             "parameters": parameters,
             "working_set_bytes": working_bytes,
             "best_effort_reference_gb_s": reference,
-            "component_cap_gb_s": reference / 2,
             "best_effort": best_effort,
-            "split_50_50": partitioned,
+            "partitioned": partitioned,
         }
         args.json.parent.mkdir(parents=True, exist_ok=True)
         args.json.write_text(json.dumps(payload, indent=2) + "\n")
