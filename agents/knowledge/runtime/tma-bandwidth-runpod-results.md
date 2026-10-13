@@ -108,3 +108,15 @@ This checks throughput with 2–8 disjoint worker groups and local budgets. It
 does not exercise same-SM multiplexing or establish isolation under unequal
 demand. Raw per-worker timestamps and all trials are retained in
 `output/runpod_bandwidth_scaling_20261013.json`, locally and on RunPod.
+
+### Four/eight-component rerun
+
+Reran `--components 4 8` on the same checkout with unchanged defaults, two
+warmups/five measured launches, no competing compute process. Fresh reference:
+1829.54 GB/s. Four components: cap 457.39 GB/s each, first three achieved
+449.40–449.63 and last 457.08; aggregate 1736.82 GB/s (94.9%), 4.405 ms.
+Eight components: cap 228.69 each, first seven achieved 224.68–224.93 and last
+228.65; aggregate 1629.08 GB/s (89.0%), 4.696 ms. Aggregate results differ from
+the previous sweep by less than 0.02%; the completion-tail observation reproduces.
+Raw results: `output/runpod_bandwidth_scaling_4_8_rerun_20261013.json` locally
+and on RunPod. Remote log: `.agentlog/bandwidth_scaling_4_8_rerun.log`.
