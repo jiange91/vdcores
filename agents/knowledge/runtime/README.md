@@ -16,6 +16,7 @@ Then pull in narrower notes as needed:
 - [tma-bandwidth-isolation-design.md](tma-bandwidth-isolation-design.md): implemented local rate/burst API, accounting scope, and validation; outstanding/live controls are outside the current implementation
 - [tma-bandwidth-runpod-results.md](tma-bandwidth-runpod-results.md): H100 PCIe build and load-only best-effort/partitioned measurements, including worker-count and unit caveats
 - [tma-bandwidth-partition-results.md](tma-bandwidth-partition-results.md): independent worker/BW ratio sweeps, matched SM-only baselines, transfer-size calibration, and full-budget limits
+- [tma-bandwidth-register-comparison.md](tma-bandwidth-register-comparison.md): matched main/limiter compiler reports; full builds both use 255 regs/thread, load-only builds use 38/48
 
 ## What Each Note Covers
 
