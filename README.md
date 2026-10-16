@@ -129,6 +129,21 @@ stores; that load is included in byte accounting. A high cap is intended to be
 nonbinding, but the script does not collect admission-wait counts. Binding-cap
 slowdowns also include waiting for operands. No runtime changes are required.
 
+For the existing CUDA-core RMSNorm operator (no Tensor Core compute):
+
+```bash
+python app/python/bandwidth_rmsnorm.py --json output/bandwidth_rmsnorm.json
+```
+
+Defaults: 512 distinct 4096-element BF16 rows per worker, eight on-device passes,
+five warmups and ten interleaved rounds. Each row loads an 8-KiB weight vector
+and 8-KiB input, then stores an 8-KiB output. Weights are reused across rows.
+Modes are disabled, 1000× baseline cap, and 1×/0.75×/0.5× caps. Mode order rotates
+each round; slowdown is the median per-round ratio against disabled. Reports
+elements/s and logical TMA bandwidth, including cached weights and the final
+completion load. The existing handler uses packed BF16 arithmetic and FP32
+reductions. No runtime changes or rebuild are needed if that handler is installed.
+
 ### Runtime Layout
 
 The codebase is organized around three layers:
