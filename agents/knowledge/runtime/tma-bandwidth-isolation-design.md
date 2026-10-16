@@ -3,8 +3,9 @@
 Design discussion, 2026-10-12; local rate/burst implementation added 2026-10-13.
 No tests are included, as requested. CUDA compilation and the load-only benchmark
 were verified on RunPod's H100 PCIe on 2026-10-13; see
-[run results](tma-bandwidth-runpod-results.md). Store/reduction behavior and general
-workload isolation remain unverified. The local Mac has no CUDA environment.
+[run results](tma-bandwidth-runpod-results.md). Repeated GEMM loads/stores were
+also exercised on 2026-10-16; reductions and general workload isolation remain
+unverified. The local Mac has no CUDA environment.
 
 Current agreed implementation scope: fixed per-launch local rate/burst budgets only. Do not implement live updates or explicit outstanding-transfer tracking. Their discussion below is background, not a requirement for the first version.
 
@@ -105,8 +106,9 @@ all passes; a final barrier-gated 16-byte load and Dummy consumer put full outpu
 completion inside the device profile window, with those extra read bytes counted.
 Reports median device time/TFLOP/s/logical GB/s/slowdown and optional raw-trial JSON.
 High cap is a nonbinding candidate, not verified by admission-wait counters;
-binding runs combine operand starvation with software overhead. Syntax and CLI
-checks passed locally; GPU execution is pending. No tests or runtime changes.
+binding runs combine operand starvation with software overhead. Compilation,
+small output validation and GPU execution succeeded on RunPod H100 on 2026-10-16;
+see [GEMM results](tma-gemm-runpod-results.md). No tests or runtime changes.
 
 Run two independent TMA-only components inside one launch. Sweep rate, burst, worker count, and outstanding limits. Check the GPU-wide admitted-byte envelope, achieved read/write bandwidth, component latency/goodput, and slowdown of a fixed-budget component when its neighbor increases demand. Compare disabled admission with baseline to isolate bookkeeping overhead. Then measure configuration-change settling time and borrowing/reclamation.
 
