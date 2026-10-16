@@ -113,6 +113,22 @@ Defaults use 32-KiB transfers, 256 tiles/worker and 32 passes: larger transfers
 allow a small worker group to offer high bandwidth. The original 8-KiB workload
 can be selected with `--tile-bytes 8192 --loads-per-sm 1024 --passes 8`.
 
+For repeated GEMM with IO admission disabled, a high cap, and a cap sweep:
+
+```bash
+python app/python/bandwidth_gemm.py --json output/bandwidth_gemm.json
+```
+
+Uses the existing BF16 `Gemm_M64N128K64` operator: one independent 64×128×K
+GEMM per worker, repeated on device. Defaults: K=4096, eight passes, two warmups,
+five measured launches, high cap at 10× baseline logical IO rate and sweep caps
+at 1×/0.75×/0.5×. Change `--sms`, `--k`, `--passes`, or `--cap-fractions` as needed.
+The output reports device time, TFLOP/s, logical read-plus-write GB/s and slowdown.
+An existing barrier and final 16-byte load make timing include completed output
+stores; that load is included in byte accounting. A high cap is intended to be
+nonbinding, but the script does not collect admission-wait counts. Binding-cap
+slowdowns also include waiting for operands. No runtime changes are required.
+
 ### Runtime Layout
 
 The codebase is organized around three layers:

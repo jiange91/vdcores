@@ -96,6 +96,18 @@ Add borrowing after fixed-rate isolation works: a device controller can lend unu
 
 ## First validation
 
+`app/python/bandwidth_gemm.py` (added 2026-10-16) implements a simple repeated
+GEMM experiment using existing `Gemm_M64N128K64`, `LoopC` and `LoopM`: independent
+64x128xK products per worker, no new CUDA handlers. Disabled admission establishes
+a logical read+write reference; the same work is rerun with a high cap (default
+10x) and fractional caps (1x/0.75x/0.5x). Per-worker output-store barriers count
+all passes; a final barrier-gated 16-byte load and Dummy consumer put full output
+completion inside the device profile window, with those extra read bytes counted.
+Reports median device time/TFLOP/s/logical GB/s/slowdown and optional raw-trial JSON.
+High cap is a nonbinding candidate, not verified by admission-wait counters;
+binding runs combine operand starvation with software overhead. Syntax and CLI
+checks passed locally; GPU execution is pending. No tests or runtime changes.
+
 Run two independent TMA-only components inside one launch. Sweep rate, burst, worker count, and outstanding limits. Check the GPU-wide admitted-byte envelope, achieved read/write bandwidth, component latency/goodput, and slowdown of a fixed-budget component when its neighbor increases demand. Compare disabled admission with baseline to isolate bookkeeping overhead. Then measure configuration-change settling time and borrowing/reclamation.
 
 Use measured DRAM bytes rather than interpreting no-L2-read-hits as instantaneous HBM service. Alignment, write buffering, and asynchronous completion can still separate issue time from physical memory traffic.
