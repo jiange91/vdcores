@@ -59,9 +59,9 @@ K=4096, eight passes, same 114 workers, two warmups/five samples. Input 171 MiB;
 ## Interpretation and artifacts
 
 High cap is intended to avoid throttling; no admission-denial counters were
-collected, so it is not proven to be entirely nonbinding. Its roughly 5% larger-
-configuration slowdown is an observed end-to-end GEMM effect, not a measurement
-isolating CUDA-core contention alone. Binding-cap slowdowns include operand
+collected, so it is not proven to be entirely nonbinding. The initial fixed-order
+roughly 5% gap did not reproduce in the interleaved comparison below and should
+not be treated as stable bookkeeping overhead. Binding-cap slowdowns include operand
 starvation. Same-binary comparisons hold register reservation constant; they
 do not measure compile-time register-footprint costs. This is batched skinny
 GEMM, not one large square GEMM or a model. Logical TMA bytes are not physical
@@ -75,3 +75,35 @@ remotely under `output/` (JSON) / `.agentlog/` (logs):
   `gemm_small_20261016.log`, `gemm_default_20261016.log`, `gemm_large_20261016.log`.
 
 Export checksum and all trial FLOP/byte/time calculations were verified locally.
+
+## Interleaved overhead follow-up
+
+Same 114-worker K=16384/pass=32 workload and binary. Reused identical tensors
+and launcher objects, warmed each mode five times, then measured 12 rounds of
+disabled, 10x and 1000x caps, rotating order each round. Caps used the original
+1591.21 GB/s reference. No concurrent GPU benchmark runs.
+
+| Mode | Median device ms | Median paired slowdown |
+| --- | ---: | ---: |
+| Disabled | 14.356 | — |
+| 10x cap | 14.472 | 0.96% |
+| 1000x cap | 14.471 | 0.81% |
+
+Paired slowdown is the median of per-round ratios against disabled, not a ratio
+of timing medians. An earlier separate 1000x-cap run showed 0.33% slowdown.
+The evidence supports an approximately 1% incremental effect in this interleaved
+run; the original 3–5% estimates are sensitive to measurement protocol. Clock
+state was not controlled, so the cause of the difference remains unresolved.
+
+Unsaturated Tensor Cores/HBM do not exclude instruction-issue or producer-latency
+limits. Admission adds a shared lock, timer read and arithmetic before TMA issue;
+these can create operand-arrival bubbles. This is a hypothesis, not an observed
+stall breakdown. Register reservation is identical for enabled/disabled modes.
+Nsight Compute 2025.3.1 was attempted with scheduler, warp-state and memory
+sections but failed with `ERR_NVGPUCTRPERM`; no usable hardware counters were
+collected and host permissions were not changed.
+
+Additional local `output/` artifacts: `gemm_interleaved_20261016.json`,
+`gemm_high1000_20261016.json` and matching logs, plus
+`gemm_ncu_diag_20261016.log`. Remote JSONs are under `output/`, logs under
+`.agentlog/`. Runtime code was unchanged; no tests added.
